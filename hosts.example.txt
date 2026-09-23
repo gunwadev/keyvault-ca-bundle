@@ -1,0 +1,5 @@
+# One host per line. Optional second column = Key Vault secret name.
+# Without a name, the secret is called ca-bundle-<host-with-dashes>.
+sub.mydomain.com
+https://api.mydomain.com/health      internal-api-ca
+reports.mydomain.com:8443

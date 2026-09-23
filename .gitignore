@@ -1,0 +1,4 @@
+.crossverify/
+ca-bundles/
+hosts.txt
+*.pem
