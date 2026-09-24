@@ -287,7 +287,7 @@ spec:
 
 ## Run it in a pipeline instead
 
-[`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps task, every day. It only uploads when a certificate changed. It uses OpenSSL and curl, not PowerShell. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
+[`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps pipeline that you run by hand. It only uploads when a certificate changed, and it lists the certificate names at the end. It uses OpenSSL and curl, not PowerShell. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
 
 1. Set the variables at the top: `certHosts` (space-separated) and `vaultName`. Each host is uploaded as `ca-bundle-<host-with-dashes>`, and the last step lists every CA bundle in the vault.
 2. Set `azureSubscription` to a service connection whose identity has **Key Vault Secrets Officer** on the vault.

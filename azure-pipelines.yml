@@ -1,11 +1,7 @@
-# Daily: uploads each server's CA chain to Azure Key Vault if it changed, then lists them.
+# Uploads each server's CA chain to Azure Key Vault if it changed, then lists them. Run it manually.
 # Nothing is committed: the certificates are downloaded fresh on every run.
 
-trigger: none
-schedules:
-  - cron: "0 6 * * *"            # every day at 06:00 UTC
-    branches: { include: [main] }
-    always: true
+trigger: none                    # manual runs only
 
 pool:
   vmImage: ubuntu-latest         # Microsoft-hosted Azure Pipelines agent
@@ -21,6 +17,7 @@ steps:
       azureSubscription: my-service-connection   # needs Key Vault Secrets Officer
       scriptType: bash
       scriptLocation: inlineScript
+      visibleAzLogin: false          # hide subscription and tenant details in the log
       inlineScript: |
         set -e
         for host in $CERTHOSTS; do
@@ -58,6 +55,12 @@ steps:
       azureSubscription: my-service-connection
       scriptType: bash
       scriptLocation: inlineScript
+      visibleAzLogin: false          # hide subscription and tenant details in the log
       inlineScript: |
-        az keyvault secret list --vault-name "$VAULTNAME" \
-          --query "[?contentType=='application/x-pem-file'].name" -o tsv
+        names=$(az keyvault secret list --vault-name "$VAULTNAME" \
+          --query "[?contentType=='application/x-pem-file'].name" -o tsv)
+        echo "##[section]Certificates in Key Vault"
+        echo "$names"
+        # Same list on the run's summary page
+        { echo "## Certificates in Key Vault"; echo "$names" | sed 's/^/- /'; } > "$AGENT_TEMPDIRECTORY/certs.md"
+        echo "##vso[task.uploadsummary]$AGENT_TEMPDIRECTORY/certs.md"
