@@ -1,9 +1,9 @@
-# Uploads each server's CA chain to Azure Key Vault, then lists them.
+# Daily: uploads each server's CA chain to Azure Key Vault if it changed, then lists them.
 # Nothing is committed: the certificates are downloaded fresh on every run.
 
 trigger: none
 schedules:
-  - cron: "0 6 * * 1"            # every Monday, catches certificate changes
+  - cron: "0 6 * * *"            # every day at 06:00 UTC
     branches: { include: [main] }
     always: true
 
@@ -40,8 +40,14 @@ steps:
 
           # 3. Check the bundle, then upload it as ca-bundle-<host with dashes>
           openssl verify -CAfile ca-bundle.pem leaf.pem
-          az keyvault secret set --vault-name "$VAULTNAME" --name "ca-bundle-${host//./-}" \
-            --file ca-bundle.pem --content-type application/x-pem-file --output none
+          name="ca-bundle-${host//./-}"
+          if [ "$(az keyvault secret show --vault-name "$VAULTNAME" --name "$name" --query value -o tsv 2>/dev/null)" = "$(cat ca-bundle.pem)" ]; then
+            echo "Unchanged, skipping upload"
+          else
+            az keyvault secret set --vault-name "$VAULTNAME" --name "$name" \
+              --file ca-bundle.pem --content-type application/x-pem-file --output none
+            echo "Uploaded $name"
+          fi
           cd ..
         done
 
