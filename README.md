@@ -291,7 +291,7 @@ spec:
 
 1. Set the variables at the top: `certHosts` (space-separated) and `vaultName`. Each host is uploaded as `ca-bundle-<host-with-dashes>`, and the last step lists every CA bundle in the vault.
 2. Set `azureSubscription` to a service connection whose identity has **Key Vault Secrets Officer** on the vault.
-3. Use a Linux agent pool that can reach the host. Linux agents already have bash, OpenSSL, and curl. Microsoft-hosted agents can't reach internal servers.
+3. It runs on the Microsoft-hosted Azure pool (`ubuntu-latest`), which already has bash, OpenSSL, curl, and the Azure CLI. The hosts must be reachable from the internet. For a host only reachable inside your network, switch `pool` to a self-hosted agent that can reach it.
 4. In Azure DevOps, create a pipeline from this file.
 
 The task handles hosts whose CA can be downloaded. For a private CA root that cannot be downloaded, run `Build-CaBundle.ps1` with `-ExtraRootCertPath` instead.

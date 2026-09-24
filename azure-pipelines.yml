@@ -8,7 +8,7 @@ schedules:
     always: true
 
 pool:
-  name: my-selfhosted-pool       # Linux agent that can reach the hosts
+  vmImage: ubuntu-latest         # Microsoft-hosted Azure Pipelines agent
 
 variables:
   certHosts: sub.mydomain.com api.mydomain.com   # space-separated
@@ -60,4 +60,4 @@ steps:
       scriptLocation: inlineScript
       inlineScript: |
         az keyvault secret list --vault-name "$VAULTNAME" \
-          --query "[?contentType=='application/x-pem-file'].{Name:name, Updated:attributes.updated}" -o table
+          --query "[?contentType=='application/x-pem-file'].name" -o tsv
