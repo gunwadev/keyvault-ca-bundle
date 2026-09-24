@@ -19,9 +19,10 @@ steps:
       scriptLocation: inlineScript
       visibleAzLogin: false          # hide subscription and tenant details in the log
       inlineScript: |
-        set -e
-        for host in $CERTHOSTS; do
-          echo "=== $host"
+        # Build, check, and upload one host's CA bundle. Runs in its own shell so one failure doesn't stop the others.
+        bundle() {
+          set -e
+          host=$1
           mkdir -p "$host" && cd "$host"
 
           # 1. Get the server's certificate
@@ -29,9 +30,22 @@ steps:
           cp leaf.pem cert.pem; : > ca-bundle.pem
 
           # 2. Follow each certificate's "CA Issuers" link until reaching the root (it signs itself)
-          while [ "$(openssl x509 -in cert.pem -noout -subject_hash)" != "$(openssl x509 -in cert.pem -noout -issuer_hash)" ]; do
-            url=$(openssl x509 -in cert.pem -noout -text | grep -o 'CA Issuers - URI:.*' | cut -d: -f2-)
-            curl -fsSL "$url" | openssl x509 -inform DER -out cert.pem
+          for step in 1 2 3 4 5 6; do
+            want=$(openssl x509 -in cert.pem -noout -issuer_hash)
+            [ "$want" = "$(openssl x509 -in cert.pem -noout -subject_hash)" ] && break
+            # Public roots are already on the agent. Use that copy if it's there.
+            if [ -f "/etc/ssl/certs/$want.0" ]; then
+              cp "/etc/ssl/certs/$want.0" cert.pem; cat cert.pem >> ca-bundle.pem; continue
+            fi
+            url=$(openssl x509 -in cert.pem -noout -text | grep -o 'CA Issuers - URI:.*' | head -1 | cut -d: -f2-)
+            [ -n "$url" ] || { echo "No download link for $(openssl x509 -in cert.pem -noout -issuer)"; exit 1; }
+            curl -fsSL "$url" -o download
+            # .crt links hold one certificate. .p7c links (e.g. Sectigo) hold several: keep the matching one.
+            if ! openssl x509 -inform DER -in download -out cert.pem 2>/dev/null; then
+              rm -f p7_*.pem
+              openssl pkcs7 -inform DER -print_certs -in download | awk '/BEGIN CERT/{n++} n{print > ("p7_" n ".pem")}'
+              for c in p7_*.pem; do [ "$(openssl x509 -in "$c" -noout -subject_hash)" = "$want" ] && cp "$c" cert.pem; done
+            fi
             cat cert.pem >> ca-bundle.pem
           done
 
@@ -45,8 +59,14 @@ steps:
               --file ca-bundle.pem --content-type application/x-pem-file --output none
             echo "Uploaded $name"
           fi
-          cd ..
+        }
+
+        failed=""
+        for host in $CERTHOSTS; do
+          echo "=== $host"
+          bash -c "$(declare -f bundle); bundle $host" || failed="$failed $host"
         done
+        if [ -n "$failed" ]; then echo "##[error]Failed:$failed"; exit 1; fi
 
   - task: AzureCLI@2
     displayName: List CA bundles in Key Vault

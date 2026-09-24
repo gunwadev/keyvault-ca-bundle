@@ -14,3 +14,10 @@ Chain building uses CustomRootTrust with downloads disabled, so a bundle is uplo
 
 ## 2026-09-23 Pipeline task uses bash + OpenSSL, the script stays PowerShell
 The pipeline task runs on Linux agents, which always have openssl and curl, so it needs no PowerShell 7 install. Build-CaBundle.ps1 stays .NET-only so it runs on Windows without OpenSSL.
+
+## 2026-09-23 Pipeline task: real-world chain quirks it must handle
+Found by testing github.com and learn.microsoft.com in a real Azure DevOps run.
+- Sectigo publishes issuers as `.p7c` (PKCS#7 with several certs), not a single DER `.crt`. The task opens the bundle and keeps the cert whose subject matches.
+- Some chains end in a cross-signed root with no download link. The task first checks the agent's trust store (`/etc/ssl/certs/<issuer_hash>.0`) and uses that root if present. Private CAs are not there, so they still download.
+- Microsoft lists two CA Issuers URLs; only the first is used.
+- One failing host must not stop the others. Each host runs in its own `bash -c` so `set -e` still applies inside it (set -e is ignored in a function called with `||`). Failures are listed and the step fails at the end.
