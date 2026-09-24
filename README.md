@@ -294,7 +294,7 @@ spec:
 3. Use a Linux agent pool that can reach the host. Linux agents already have bash, OpenSSL, and curl. Microsoft-hosted agents can't reach internal servers.
 4. In Azure DevOps, create a pipeline from this file.
 
-The task handles hosts whose CA can be downloaded. For several hosts or a private CA root, run `Build-CaBundle.ps1` in the task instead.
+The task handles hosts whose CA can be downloaded. For a private CA root that cannot be downloaded, run `Build-CaBundle.ps1` with `-ExtraRootCertPath` instead.
 
 ## Script options
 
