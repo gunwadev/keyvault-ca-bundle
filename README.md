@@ -285,6 +285,17 @@ spec:
 
 **11. Fix it at the source.** If the server sent only its leaf, ask the server team to configure it to send the leaf and intermediate together. After that, clients need nothing extra, and you can remove all of this. A private CA is different: trusting its root is the normal setup, so keep the bundle.
 
+## Run it in a pipeline instead
+
+[`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps task, on a weekly schedule. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
+
+1. Set the three variables at the top: `certHost`, `vaultName`, `secretName`.
+2. Set `azureSubscription` to a service connection whose identity has **Key Vault Secrets Officer** on the vault.
+3. Use an agent pool that can reach the host. Microsoft-hosted agents can't reach internal servers.
+4. In Azure DevOps, create a pipeline from this file.
+
+The task handles one host whose CA can be downloaded. For several hosts or a private CA root, run `Build-CaBundle.ps1` in the task instead.
+
 ## Script options
 
 | Option | What it does |
