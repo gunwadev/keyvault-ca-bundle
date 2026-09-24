@@ -1,5 +1,5 @@
-# Uploads a server's CA chain to Azure Key Vault. Nothing is committed:
-# the certificates are downloaded fresh on every run.
+# Uploads each server's CA chain to Azure Key Vault, then lists them.
+# Nothing is committed: the certificates are downloaded fresh on every run.
 
 trigger: none
 schedules:
@@ -8,32 +8,50 @@ schedules:
     always: true
 
 pool:
-  name: my-selfhosted-pool       # Linux agent that can reach the host
+  name: my-selfhosted-pool       # Linux agent that can reach the hosts
 
 variables:
-  certHost: sub.mydomain.com
+  certHosts: sub.mydomain.com api.mydomain.com   # space-separated
   vaultName: my-kv
-  secretName: internal-ca-bundle
 
 steps:
   - task: AzureCLI@2
+    displayName: Upload CA bundles
     inputs:
       azureSubscription: my-service-connection   # needs Key Vault Secrets Officer
       scriptType: bash
       scriptLocation: inlineScript
       inlineScript: |
         set -e
-        # 1. Get the server's certificate
-        openssl s_client -connect "$CERTHOST:443" -servername "$CERTHOST" </dev/null 2>/dev/null | openssl x509 -out leaf.pem
-        cp leaf.pem cert.pem; : > ca-bundle.pem
+        for host in $CERTHOSTS; do
+          echo "=== $host"
+          mkdir -p "$host" && cd "$host"
 
-        # 2. Follow each certificate's "CA Issuers" link until reaching the root (it signs itself)
-        while [ "$(openssl x509 -in cert.pem -noout -subject_hash)" != "$(openssl x509 -in cert.pem -noout -issuer_hash)" ]; do
-          url=$(openssl x509 -in cert.pem -noout -text | grep -o 'CA Issuers - URI:.*' | cut -d: -f2-)
-          curl -fsSL "$url" | openssl x509 -inform DER -out cert.pem
-          cat cert.pem >> ca-bundle.pem
+          # 1. Get the server's certificate
+          openssl s_client -connect "$host:443" -servername "$host" </dev/null 2>/dev/null | openssl x509 -out leaf.pem
+          cp leaf.pem cert.pem; : > ca-bundle.pem
+
+          # 2. Follow each certificate's "CA Issuers" link until reaching the root (it signs itself)
+          while [ "$(openssl x509 -in cert.pem -noout -subject_hash)" != "$(openssl x509 -in cert.pem -noout -issuer_hash)" ]; do
+            url=$(openssl x509 -in cert.pem -noout -text | grep -o 'CA Issuers - URI:.*' | cut -d: -f2-)
+            curl -fsSL "$url" | openssl x509 -inform DER -out cert.pem
+            cat cert.pem >> ca-bundle.pem
+          done
+
+          # 3. Check the bundle, then upload it as ca-bundle-<host with dashes>
+          openssl verify -CAfile ca-bundle.pem leaf.pem
+          az keyvault secret set --vault-name "$VAULTNAME" --name "ca-bundle-${host//./-}" \
+            --file ca-bundle.pem --content-type application/x-pem-file --output none
+          cd ..
         done
 
-        # 3. Check the bundle, then upload it
-        openssl verify -CAfile ca-bundle.pem leaf.pem
-        az keyvault secret set --vault-name "$VAULTNAME" --name "$SECRETNAME" --file ca-bundle.pem --output none
+  - task: AzureCLI@2
+    displayName: List CA bundles in Key Vault
+    condition: always()          # runs even if a host failed
+    inputs:
+      azureSubscription: my-service-connection
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az keyvault secret list --vault-name "$VAULTNAME" \
+          --query "[?contentType=='application/x-pem-file'].{Name:name, Updated:attributes.updated}" -o table

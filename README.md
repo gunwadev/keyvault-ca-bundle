@@ -289,12 +289,12 @@ spec:
 
 [`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps task, on a weekly schedule. It uses OpenSSL and curl, not PowerShell. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
 
-1. Set the three variables at the top: `certHost`, `vaultName`, `secretName`.
+1. Set the variables at the top: `certHosts` (space-separated) and `vaultName`. Each host is uploaded as `ca-bundle-<host-with-dashes>`, and the last step lists every CA bundle in the vault.
 2. Set `azureSubscription` to a service connection whose identity has **Key Vault Secrets Officer** on the vault.
 3. Use a Linux agent pool that can reach the host. Linux agents already have bash, OpenSSL, and curl. Microsoft-hosted agents can't reach internal servers.
 4. In Azure DevOps, create a pipeline from this file.
 
-The task handles one host whose CA can be downloaded. For several hosts or a private CA root, run `Build-CaBundle.ps1` in the task instead.
+The task handles hosts whose CA can be downloaded. For several hosts or a private CA root, run `Build-CaBundle.ps1` in the task instead.
 
 ## Script options
 
