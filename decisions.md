@@ -21,3 +21,8 @@ Found by testing github.com and learn.microsoft.com in a real Azure DevOps run.
 - Some chains end in a cross-signed root with no download link. The task first checks the agent's trust store (`/etc/ssl/certs/<issuer_hash>.0`) and uses that root if present. Private CAs are not there, so they still download.
 - Microsoft lists two CA Issuers URLs; only the first is used.
 - One failing host must not stop the others. Each host runs in its own `bash -c` so `set -e` still applies inside it (set -e is ignored in a function called with `||`). Failures are listed and the step fails at the end.
+
+## 2026-09-24 Agent instructions: public CLAUDE.md plus gitignored CLAUDE.local.md
+**Decision:** `CLAUDE.md` holds only non-identifying rules, test commands, and the two-implementation note. Test infrastructure, account names, and publishing details live in `CLAUDE.local.md`, which is gitignored.
+**Why:** the repo is public and must not reveal the owner's org, subscription, vault, or domain.
+**Rejected:** a single committed CLAUDE.md with everything (leaks identifying details); `.claude/rules/` files (the repo has three source files, so one root file is enough).
