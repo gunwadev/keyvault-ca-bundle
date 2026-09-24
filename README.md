@@ -18,7 +18,7 @@ Or download [`Build-CaBundle.ps1`](Build-CaBundle.ps1) and [`hosts.example.txt`]
 | PowerShell 7.2+ | Running the script | `winget install Microsoft.PowerShell` | `brew install --cask powershell` | [Microsoft install guide](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux) |
 | Azure CLI | Uploading to Key Vault | `winget install Microsoft.AzureCLI` | `brew install azure-cli` | `curl -sL https://aka.ms/InstallAzureCLIDeb \| sudo bash` |
 | Terraform | Granting ESO read access to the vault | `winget install Hashicorp.Terraform` | `brew install hashicorp/tap/terraform` | [HashiCorp install guide](https://developer.hashicorp.com/terraform/install) |
-| OpenSSL (optional) | Checking a server by hand. The script doesn't need it. | `winget install ShiningLight.OpenSSL.Light`, or use the one in Git Bash | Already installed | `sudo apt install openssl` |
+| OpenSSL | The pipeline task, and checking a server by hand. `Build-CaBundle.ps1` doesn't need it. | `winget install ShiningLight.OpenSSL.Light`, or use the one in Git Bash | Already installed | `sudo apt install openssl` |
 
 The script needs PowerShell 7 (`pwsh`). The built-in Windows PowerShell 5.1 (`powershell.exe`) won't run it. Check with `pwsh -v`.
 
@@ -287,11 +287,11 @@ spec:
 
 ## Run it in a pipeline instead
 
-[`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps task, on a weekly schedule. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
+[`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps task, on a weekly schedule. It uses OpenSSL and curl, not PowerShell. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
 
 1. Set the three variables at the top: `certHost`, `vaultName`, `secretName`.
 2. Set `azureSubscription` to a service connection whose identity has **Key Vault Secrets Officer** on the vault.
-3. Use an agent pool that can reach the host. Microsoft-hosted agents can't reach internal servers.
+3. Use a Linux agent pool that can reach the host. Linux agents already have bash, OpenSSL, and curl. Microsoft-hosted agents can't reach internal servers.
 4. In Azure DevOps, create a pipeline from this file.
 
 The task handles one host whose CA can be downloaded. For several hosts or a private CA root, run `Build-CaBundle.ps1` in the task instead.

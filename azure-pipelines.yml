@@ -1,15 +1,14 @@
-# Builds a CA bundle for one host and uploads it to Azure Key Vault.
-# Nothing is committed: the certificates are downloaded from the server on every run.
-# For several hosts, or a private CA whose root can't be downloaded, use Build-CaBundle.ps1 instead.
+# Uploads a server's CA chain to Azure Key Vault. Nothing is committed:
+# the certificates are downloaded fresh on every run.
 
 trigger: none
 schedules:
-  - cron: "0 6 * * 1"            # every Monday at 06:00 UTC, catches certificate changes
+  - cron: "0 6 * * 1"            # every Monday, catches certificate changes
     branches: { include: [main] }
     always: true
 
 pool:
-  name: my-selfhosted-pool       # must be able to reach the host
+  name: my-selfhosted-pool       # Linux agent that can reach the host
 
 variables:
   certHost: sub.mydomain.com
@@ -18,51 +17,23 @@ variables:
 
 steps:
   - task: AzureCLI@2
-    displayName: Upload CA bundle to Key Vault
     inputs:
-      azureSubscription: my-service-connection   # its identity needs Key Vault Secrets Officer
-      scriptType: pscore                          # PowerShell 7
+      azureSubscription: my-service-connection   # needs Key Vault Secrets Officer
+      scriptType: bash
       scriptLocation: inlineScript
       inlineScript: |
-        $ErrorActionPreference = 'Stop'
-        $certHost = $env:CERTHOST; $vaultName = $env:VAULTNAME; $secretName = $env:SECRETNAME
+        set -e
+        # 1. Get the server's certificate
+        openssl s_client -connect "$CERTHOST:443" -servername "$CERTHOST" </dev/null 2>/dev/null | openssl x509 -out leaf.pem
+        cp leaf.pem cert.pem; : > ca-bundle.pem
 
-        # 1. Get the server's certificate (the leaf)
-        $tcp = [Net.Sockets.TcpClient]::new($certHost, 443)
-        $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false, { $true })
-        $ssl.AuthenticateAsClient($certHost)
-        $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($ssl.RemoteCertificate)
-        $tcp.Dispose()
-        $leaf = $cert
+        # 2. Follow each certificate's "CA Issuers" link until reaching the root (it signs itself)
+        while [ "$(openssl x509 -in cert.pem -noout -subject_hash)" != "$(openssl x509 -in cert.pem -noout -issuer_hash)" ]; do
+          url=$(openssl x509 -in cert.pem -noout -text | grep -o 'CA Issuers - URI:.*' | cut -d: -f2-)
+          curl -fsSL "$url" | openssl x509 -inform DER -out cert.pem
+          cat cert.pem >> ca-bundle.pem
+        done
 
-        # 2. Follow each certificate's "CA Issuers" link up to the root
-        $http = [Net.Http.HttpClient]::new()
-        $chain = @()
-        while ($cert.Subject -ne $cert.Issuer) {
-          $ext = $cert.Extensions | Where-Object { $_.Oid.Value -eq '1.3.6.1.5.5.7.1.1' }
-          $url = if ($ext) { [Security.Cryptography.X509Certificates.X509AuthorityInformationAccessExtension]::new($ext.RawData, $false).EnumerateCAIssuersUris() | Select-Object -First 1 }
-          if (-not $url) { throw "No download link for $($cert.Issuer). Get this CA from your PKI team." }
-          $col = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
-          try { $col.Import($http.GetByteArrayAsync($url).Result) } catch { throw "Could not download $url. Get this CA from your PKI team." }
-          $cert = $col | Where-Object Subject -eq $cert.Issuer | Select-Object -First 1
-          if (-not $cert) { throw "Could not download the issuer from $url" }
-          Write-Host "Downloaded $($cert.Subject)"
-          $chain += $cert
-        }
-
-        # 3. Check the chain proves the leaf using only these certificates
-        $check = [Security.Cryptography.X509Certificates.X509Chain]::new()
-        $check.ChainPolicy.RevocationMode = 'NoCheck'
-        $check.ChainPolicy.DisableCertificateDownloads = $true
-        $check.ChainPolicy.TrustMode = 'CustomRootTrust'
-        $check.ChainPolicy.CustomTrustStore.Add($chain[-1]) | Out-Null
-        $chain[0..($chain.Count - 2)] | Where-Object { $_ } | ForEach-Object { $check.ChainPolicy.ExtraStore.Add($_) | Out-Null }
-        if (-not $check.Build($leaf)) { throw "Chain check failed: $($check.ChainStatus.StatusInformation)" }
-
-        # 4. Upload to Key Vault (intermediate first, root last)
-        ($chain | ForEach-Object { $_.ExportCertificatePem() }) -join "`n" | Set-Content ca-bundle.pem
-        $expires = ($chain.NotAfter | Measure-Object -Minimum).Minimum.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-        az keyvault secret set --vault-name $vaultName --name $secretName --file ca-bundle.pem `
-          --content-type application/x-pem-file --expires $expires --output none
-        if ($LASTEXITCODE) { throw 'Upload failed' }
-        Write-Host "Uploaded $($chain.Count) certificate(s) to $vaultName/$secretName"
+        # 3. Check the bundle, then upload it
+        openssl verify -CAfile ca-bundle.pem leaf.pem
+        az keyvault secret set --vault-name "$VAULTNAME" --name "$SECRETNAME" --file ca-bundle.pem --output none
