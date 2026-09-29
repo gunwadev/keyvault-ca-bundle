@@ -11,7 +11,7 @@ Builds a verified CA bundle (intermediate + root) for HTTPS hosts, uploads it to
 ## Two implementations of the same job
 
 - `Build-CaBundle.ps1`: PowerShell 7 and .NET only, no OpenSSL. Handles many hosts, combined bundles, private roots (`-ExtraRootCertPath`), `-WhatIf`.
-- `azure-pipelines.yml`: inline bash with OpenSSL and curl, for Linux build agents. Three tasks: Azure login, upload, list. Manual trigger only (`trigger: none`, no schedule).
+- `azure-pipelines.yml`: inline bash with OpenSSL and curl, for Linux build agents. One job per env and location (`envs` and `locations` parameters), each with three tasks: Azure login, upload, list. Manual trigger only (`trigger: none`, no schedule).
 
 A fix to chain-walking logic usually belongs in both. Why they differ, and the real-world chain quirks each must handle: `decisions.md`, entries "Pipeline task uses bash + OpenSSL" and "Pipeline task: real-world chain quirks".
 

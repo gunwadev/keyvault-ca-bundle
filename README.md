@@ -289,14 +289,16 @@ spec:
 
 [`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps pipeline that you run by hand. It uses OpenSSL and curl, not PowerShell. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
 
-It has three tasks:
+It has two parameters: `envs` (default `prod`) and `locations` (default `east`, `west`). It makes one job for each env and location, and each job uses the vault `<vaultPrefix>-<env>-<location>`, for example `my-kv-prod-east`.
+
+Each job has three tasks:
 
 - **Azure login** logs in once with the service connection. It needs no password.
 - **Get certs and push to Key Vault** loops through the hosts. It builds and checks each CA bundle, then saves it as `ca-bundle-<host-with-dashes>`. The first failed host stops the run.
-- **List Key Vault** lists every secret name in the vault.
+- **List Key Vault** lists every secret name in that job's vault.
 
-1. Set the variables at the top: `certHosts` (space-separated) and `vaultName`.
-2. Set `azureSubscription` to a service connection that uses workload identity federation. Its identity has **Key Vault Secrets Officer** on the vault.
+1. Set the variables at the top: `certHosts` (space-separated) and `vaultPrefix`. Each vault must already exist.
+2. Set `azureSubscription` to a service connection that uses workload identity federation. Its identity has **Key Vault Secrets Officer** on every vault.
 3. It runs on the Microsoft-hosted Azure pool (`ubuntu-latest`), which already has bash, OpenSSL, curl, and the Azure CLI. The hosts must be reachable from the internet. For a host only reachable inside your network, switch `pool` to a self-hosted agent that can reach it.
 4. In Azure DevOps, create a pipeline from this file.
 

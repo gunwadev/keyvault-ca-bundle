@@ -32,3 +32,6 @@ AzureCLI@2 signs out when its task ends, so only the login task uses it. It sign
 
 ## 2026-09-29 Pipeline made plain on request
 The owner asked for only three actions: log in, push each cert, list the vault. Removed the skip-if-unchanged check (each run adds a new secret version), the keep-going-after-a-failed-host wrapper (first failure stops the run), the run summary page, and the client-secret login branch (the service connection uses federation).
+
+## 2026-09-29 One vault per env and location
+The pipeline loops over `envs` and `locations` parameters and makes one job per pair, nested inside the env loop. Each job writes to `<vaultPrefix>-<env>-<location>`. Rejected: one shared vault with env and location in the secret name, because the owner wants separate vaults per region. Each job runs on its own agent, so each job logs in again.
