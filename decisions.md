@@ -26,3 +26,6 @@ Found by testing github.com and learn.microsoft.com in a real Azure DevOps run.
 **Decision:** `CLAUDE.md` holds only non-identifying rules, test commands, and the two-implementation note. Test infrastructure, account names, and publishing details live in `CLAUDE.local.md`, which is gitignored.
 **Why:** the repo is public and must not reveal the owner's org, subscription, vault, or domain.
 **Rejected:** a single committed CLAUDE.md with everything (leaks identifying details); `.claude/rules/` files (the repo has three source files, so one root file is enough).
+
+## 2026-09-29 Pipeline split into login, upload, and list tasks
+AzureCLI@2 signs out when its task ends, so only the login task uses it. It signs in again into `$AGENT_TEMPDIRECTORY/azcli` and passes that folder to the two plain `bash` tasks through `AZURE_CONFIG_DIR`. It also fetches the Key Vault token right away, because the federated sign-in token is short-lived. Verified in a real Azure DevOps run: login, 5 test hosts, and the list all passed.

@@ -1,4 +1,4 @@
-# Uploads each server's CA chain to Azure Key Vault if it changed, then lists them. Run it manually.
+# Signs in to Azure, uploads each server's CA chain to Key Vault if it changed, then lists them. Run it manually.
 # Nothing is committed: the certificates are downloaded fresh on every run.
 
 trigger: none                    # manual runs only
@@ -11,76 +11,88 @@ variables:
   vaultName: my-kv
 
 steps:
+  # Task 1: sign in once. The later tasks reuse this login through AZURE_CONFIG_DIR.
   - task: AzureCLI@2
-    displayName: Upload CA bundles
+    displayName: Azure login
     inputs:
       azureSubscription: my-service-connection   # needs Key Vault Secrets Officer
       scriptType: bash
       scriptLocation: inlineScript
       visibleAzLogin: false          # hide subscription and tenant details in the log
+      addSpnToEnvironment: true      # exposes the service connection's sign-in token to this script
       inlineScript: |
-        # Build, check, and upload one host's CA bundle. Runs in its own shell so one failure doesn't stop the others.
-        bundle() {
-          set -e
-          host=$1
-          mkdir -p "$host" && cd "$host"
+        # AzureCLI@2 signs out when this task ends, so sign in again in a folder the next tasks can use
+        export AZURE_CONFIG_DIR="$AGENT_TEMPDIRECTORY/azcli"
+        if [ -n "$idToken" ]; then     # workload identity federation
+          az login --service-principal -u "$servicePrincipalId" --tenant "$tenantId" --federated-token "$idToken" --output none
+        else                           # client secret
+          az login --service-principal -u "$servicePrincipalId" --tenant "$tenantId" -p "$servicePrincipalKey" --output none
+        fi
+        # Get the Key Vault token now, while the sign-in token is still fresh
+        az account get-access-token --resource https://vault.azure.net --output none
+        echo "##vso[task.setvariable variable=AZURE_CONFIG_DIR]$AZURE_CONFIG_DIR"
+        echo "Signed in"
 
-          # 1. Get the server's certificate
-          openssl s_client -connect "$host:443" -servername "$host" </dev/null 2>/dev/null | openssl x509 -out leaf.pem
-          cp leaf.pem cert.pem; : > ca-bundle.pem
+  # Task 2: build, check, and upload each host's CA bundle
+  - bash: |
+      # Build, check, and upload one host's CA bundle. Runs in its own shell so one failure doesn't stop the others.
+      bundle() {
+        set -e
+        host=$1
+        mkdir -p "$host" && cd "$host"
 
-          # 2. Follow each certificate's "CA Issuers" link until reaching the root (it signs itself)
-          for step in 1 2 3 4 5 6; do
-            want=$(openssl x509 -in cert.pem -noout -issuer_hash)
-            [ "$want" = "$(openssl x509 -in cert.pem -noout -subject_hash)" ] && break
-            # Public roots are already on the agent. Use that copy if it's there.
-            if [ -f "/etc/ssl/certs/$want.0" ]; then
-              cp "/etc/ssl/certs/$want.0" cert.pem; cat cert.pem >> ca-bundle.pem; continue
-            fi
-            url=$(openssl x509 -in cert.pem -noout -text | grep -o 'CA Issuers - URI:.*' | head -1 | cut -d: -f2-)
-            [ -n "$url" ] || { echo "No download link for $(openssl x509 -in cert.pem -noout -issuer)"; exit 1; }
-            curl -fsSL "$url" -o download
-            # .crt links hold one certificate. .p7c links (e.g. Sectigo) hold several: keep the matching one.
-            if ! openssl x509 -inform DER -in download -out cert.pem 2>/dev/null; then
-              rm -f p7_*.pem
-              openssl pkcs7 -inform DER -print_certs -in download | awk '/BEGIN CERT/{n++} n{print > ("p7_" n ".pem")}'
-              for c in p7_*.pem; do [ "$(openssl x509 -in "$c" -noout -subject_hash)" = "$want" ] && cp "$c" cert.pem; done
-            fi
-            cat cert.pem >> ca-bundle.pem
-          done
+        # 1. Get the server's certificate
+        openssl s_client -connect "$host:443" -servername "$host" </dev/null 2>/dev/null | openssl x509 -out leaf.pem
+        cp leaf.pem cert.pem; : > ca-bundle.pem
 
-          # 3. Check the bundle, then upload it as ca-bundle-<host with dashes>
-          openssl verify -CAfile ca-bundle.pem leaf.pem
-          name="ca-bundle-${host//./-}"
-          if [ "$(az keyvault secret show --vault-name "$VAULTNAME" --name "$name" --query value -o tsv 2>/dev/null)" = "$(cat ca-bundle.pem)" ]; then
-            echo "Unchanged, skipping upload"
-          else
-            az keyvault secret set --vault-name "$VAULTNAME" --name "$name" \
-              --file ca-bundle.pem --content-type application/x-pem-file --output none
-            echo "Uploaded $name"
+        # 2. Follow each certificate's "CA Issuers" link until reaching the root (it signs itself)
+        for step in 1 2 3 4 5 6; do
+          want=$(openssl x509 -in cert.pem -noout -issuer_hash)
+          [ "$want" = "$(openssl x509 -in cert.pem -noout -subject_hash)" ] && break
+          # Public roots are already on the agent. Use that copy if it's there.
+          if [ -f "/etc/ssl/certs/$want.0" ]; then
+            cp "/etc/ssl/certs/$want.0" cert.pem; cat cert.pem >> ca-bundle.pem; continue
           fi
-        }
-
-        failed=""
-        for host in $CERTHOSTS; do
-          echo "=== $host"
-          bash -c "$(declare -f bundle); bundle $host" || failed="$failed $host"
+          url=$(openssl x509 -in cert.pem -noout -text | grep -o 'CA Issuers - URI:.*' | head -1 | cut -d: -f2-)
+          [ -n "$url" ] || { echo "No download link for $(openssl x509 -in cert.pem -noout -issuer)"; exit 1; }
+          curl -fsSL "$url" -o download
+          # .crt links hold one certificate. .p7c links (e.g. Sectigo) hold several: keep the matching one.
+          if ! openssl x509 -inform DER -in download -out cert.pem 2>/dev/null; then
+            rm -f p7_*.pem
+            openssl pkcs7 -inform DER -print_certs -in download | awk '/BEGIN CERT/{n++} n{print > ("p7_" n ".pem")}'
+            for c in p7_*.pem; do [ "$(openssl x509 -in "$c" -noout -subject_hash)" = "$want" ] && cp "$c" cert.pem; done
+          fi
+          cat cert.pem >> ca-bundle.pem
         done
-        if [ -n "$failed" ]; then echo "##[error]Failed:$failed"; exit 1; fi
 
-  - task: AzureCLI@2
+        # 3. Check the bundle, then upload it as ca-bundle-<host with dashes>
+        openssl verify -CAfile ca-bundle.pem leaf.pem
+        name="ca-bundle-${host//./-}"
+        if [ "$(az keyvault secret show --vault-name "$VAULTNAME" --name "$name" --query value -o tsv 2>/dev/null)" = "$(cat ca-bundle.pem)" ]; then
+          echo "Unchanged, skipping upload"
+        else
+          az keyvault secret set --vault-name "$VAULTNAME" --name "$name" \
+            --file ca-bundle.pem --content-type application/x-pem-file --output none
+          echo "Uploaded $name"
+        fi
+      }
+
+      failed=""
+      for host in $CERTHOSTS; do
+        echo "=== $host"
+        bash -c "$(declare -f bundle); bundle $host" || failed="$failed $host"
+      done
+      if [ -n "$failed" ]; then echo "##[error]Failed:$failed"; exit 1; fi
+    displayName: Upload CA bundles to Key Vault
+
+  # Task 3: list what's in the vault
+  - bash: |
+      names=$(az keyvault secret list --vault-name "$VAULTNAME" \
+        --query "[?contentType=='application/x-pem-file'].name" -o tsv)
+      echo "##[section]Certificates in Key Vault"
+      echo "$names"
+      # Same list on the run's summary page
+      { echo "## Certificates in Key Vault"; echo "$names" | sed 's/^/- /'; } > "$AGENT_TEMPDIRECTORY/certs.md"
+      echo "##vso[task.uploadsummary]$AGENT_TEMPDIRECTORY/certs.md"
     displayName: List CA bundles in Key Vault
     condition: always()          # runs even if a host failed
-    inputs:
-      azureSubscription: my-service-connection
-      scriptType: bash
-      scriptLocation: inlineScript
-      visibleAzLogin: false          # hide subscription and tenant details in the log
-      inlineScript: |
-        names=$(az keyvault secret list --vault-name "$VAULTNAME" \
-          --query "[?contentType=='application/x-pem-file'].name" -o tsv)
-        echo "##[section]Certificates in Key Vault"
-        echo "$names"
-        # Same list on the run's summary page
-        { echo "## Certificates in Key Vault"; echo "$names" | sed 's/^/- /'; } > "$AGENT_TEMPDIRECTORY/certs.md"
-        echo "##vso[task.uploadsummary]$AGENT_TEMPDIRECTORY/certs.md"

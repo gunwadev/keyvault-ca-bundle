@@ -289,7 +289,13 @@ spec:
 
 [`azure-pipelines.yml`](azure-pipelines.yml) does step 6 as one Azure DevOps pipeline that you run by hand. It only uploads when a certificate changed, and it lists the certificate names at the end. It uses OpenSSL and curl, not PowerShell. Nothing is committed: each run downloads the certificates from the server and uploads them to Key Vault.
 
-1. Set the variables at the top: `certHosts` (space-separated) and `vaultName`. Each host is uploaded as `ca-bundle-<host-with-dashes>`, and the last step lists every CA bundle in the vault.
+It has three tasks:
+
+- **Azure login** signs in once with the service connection.
+- **Upload CA bundles to Key Vault** builds, checks, and uploads each host's bundle.
+- **List CA bundles in Key Vault** lists the names, even if a host failed.
+
+1. Set the variables at the top: `certHosts` (space-separated) and `vaultName`. Each host is uploaded as `ca-bundle-<host-with-dashes>`, and the last task lists every CA bundle in the vault.
 2. Set `azureSubscription` to a service connection whose identity has **Key Vault Secrets Officer** on the vault.
 3. It runs on the Microsoft-hosted Azure pool (`ubuntu-latest`), which already has bash, OpenSSL, curl, and the Azure CLI. The hosts must be reachable from the internet. For a host only reachable inside your network, switch `pool` to a self-hosted agent that can reach it.
 4. In Azure DevOps, create a pipeline from this file.
