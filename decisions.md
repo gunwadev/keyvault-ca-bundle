@@ -29,3 +29,6 @@ Found by testing github.com and learn.microsoft.com in a real Azure DevOps run.
 
 ## 2026-09-29 Pipeline split into login, upload, and list tasks
 AzureCLI@2 signs out when its task ends, so only the login task uses it. It signs in again into `$AGENT_TEMPDIRECTORY/azcli` and passes that folder to the two plain `bash` tasks through `AZURE_CONFIG_DIR`. It also fetches the Key Vault token right away, because the federated sign-in token is short-lived. Verified in a real Azure DevOps run: login, 5 test hosts, and the list all passed.
+
+## 2026-09-29 Pipeline made plain on request
+The owner asked for only three actions: log in, push each cert, list the vault. Removed the skip-if-unchanged check (each run adds a new secret version), the keep-going-after-a-failed-host wrapper (first failure stops the run), the run summary page, and the client-secret login branch (the service connection uses federation).
